@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="es">
+<!--
+════════════════════════════════════════════════════════════════════════
+  CálculoDosis·AI  ·  VARIANTE Enfermería  ·  fork de plantilla-base.html
+  Entrenador de cálculo de dosis farmacológicas.
+  DECISIÓN CLAVE: la respuesta correcta, la fórmula y la resolución
+  paso a paso son DETERMINISTAS EN CLIENTE (aritmética exacta).
+  El modelo solo genera el enunciado y los datos numéricos del caso.
+  Tipos: dosis simple · dosis/peso · perfusión (ml/h) · goteo ·
+         dilución (C1V1=C2V2) · reconstitución de vial.
+  Modos: Práctica (uno a uno, autocorregido) · Simulacro (N ejercicios, nota).
+  Reutiliza kernel: openai/agente · dlWord/dlPDF · banner/busy · saveState.
+════════════════════════════════════════════════════════════════════════
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CálculoDosis·AI · Cálculo de dosis farmacológicas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<style>
+  :root{
+    --paper:#EAF0EF;--card:#FFFFFF;--ink:#16292E;--muted:#5C7076;
+    --petrol:#0E4B54;--petrol-deep:#0A363D;--petrol-soft:#E3EDEC;
+    --line:#CEDAD8;--amber:#D98A00;--green:#1E9E8A;--coral:#D9573F;
+    --radius:14px;--shadow:0 1px 2px rgba(10,54,61,.06),0 8px 24px rgba(10,54,61,.06);
+  }
+  *{box-sizing:border-box}html,body{margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--paper);line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{font-family:'Libre Franklin',sans-serif;margin:0;letter-spacing:-.01em}
+  .mono{font-family:'JetBrains Mono',monospace}
+  button{font-family:inherit;cursor:pointer;border:none;background:none}
+  input,select,textarea{font-family:inherit;font-size:14px}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  header{background:var(--petrol-deep);color:#EAF0EF;position:sticky;top:0;z-index:20;border-bottom:1px solid #0a2a30}
+  .bar{max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand .logo{font-family:'Libre Franklin';font-weight:800;font-size:19px;letter-spacing:-.02em;color:#fff}
+  .brand .logo b{color:var(--amber)}
+  .brand .tag{font-size:11px;color:#8FB3B2;letter-spacing:.14em;text-transform:uppercase}
+
+  main{max-width:1180px;margin:0 auto;padding:22px 20px 60px;display:grid;grid-template-columns:1fr 300px;gap:22px}
+  @media(max-width:900px){main{grid-template-columns:1fr;padding:16px}}
+  .col-side{display:flex;flex-direction:column;gap:16px}
+  @media(max-width:900px){.col-side{order:-1}}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:22px}
+  .panel:last-child{margin-bottom:0}
+  .panel-h{padding:13px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .panel-h h3{font-size:14px;font-weight:700}
+  .panel-h .eyebrow{font-family:'JetBrains Mono';font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+  .panel-b{padding:18px}
+
+  .field{margin-bottom:14px}.field:last-child{margin-bottom:0}
+  label.lab{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .inp{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#FBFCFC;color:var(--ink)}
+  .inp:focus{outline:2px solid var(--petrol);outline-offset:-1px;border-color:var(--petrol)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:520px){.row2,.row3{grid-template-columns:1fr}}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;border-radius:10px;font-weight:600;font-size:14px;transition:.15s}
+  .btn-primary{background:var(--petrol);color:#fff}.btn-primary:hover{background:var(--petrol-deep)}
+  .btn-primary:disabled{background:#9DB4B3;cursor:not-allowed}
+  .btn-amber{background:var(--amber);color:#2b1c00}.btn-amber:hover{filter:brightness(.95)}
+  .btn-ghost{background:var(--petrol-soft);color:var(--petrol)}.btn-ghost:hover{background:#d3e3e1}
+  .btn-line{border:1px solid var(--line);background:#fff;color:var(--ink);font-weight:500;font-size:13px;padding:9px 12px}
+  .btn-line:hover{border-color:var(--petrol);color:var(--petrol)}
+  .btn-block{width:100%} .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+
+  .banner{border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px;display:none}
+  .banner.err{background:#FBE7E2;border:1px solid #E7B4A8;color:#9a2f1a}
+  .banner.info{background:#FFF3D6;border:1px solid #F0D89A;color:#5c4600}
+  .banner.ok{background:#DFF1ED;border:1px solid #A9D8CF;color:#0e6a5c}
+  .spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;display:inline-block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .foot{max-width:1180px;margin:0 auto;padding:8px 20px 40px;color:var(--muted);font-size:12px}
+  .foot code{font-family:'JetBrains Mono';font-size:11px}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+  .seg button{padding:8px 14px;font-size:12.5px;font-weight:600;color:var(--muted);background:#fff}
+  .seg button.on{background:var(--petrol);color:#fff}
+
+  /* Tipos de cálculo */
+  .tipogrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  @media(max-width:560px){.tipogrid{grid-template-columns:repeat(2,1fr)}}
+  .tcard{border:1px solid var(--line);border-radius:10px;padding:10px 10px;background:#FBFCFC;cursor:pointer;transition:.15s;text-align:center}
+  .tcard:hover{border-color:var(--petrol)}
+  .tcard.sel{background:var(--petrol);border-color:var(--petrol);color:#fff}
+  .tcard .tc-ic{font-size:20px;line-height:1;margin-bottom:5px}
+  .tcard .tc-nm{font-size:11px;font-weight:700}
+  .tcard .tc-ds{font-size:10px;opacity:.7;margin-top:2px}
+
+  /* Ejercicio */
+  .enunciado{background:var(--petrol-soft);border:1px solid #bcd6d3;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .enunciado .tipo-tag{font-family:'JetBrains Mono';font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--petrol);margin-bottom:6px}
+  .enunciado .txt{font-size:15px;line-height:1.6}
+  .respuesta-row{display:flex;gap:10px;align-items:flex-end}
+  .respuesta-row .inp{flex:1}
+  .respuesta-row .unidad{font-family:'JetBrains Mono';font-size:14px;color:var(--muted);white-space:nowrap;padding-bottom:12px}
+
+  /* Corrección */
+  .corr{border-radius:12px;padding:16px 18px;margin-top:14px}
+  .corr.ok{background:#E7F5F1;border:1px solid #A9D8CF}
+  .corr.fail{background:#FBE7E2;border:1px solid #E7B4A8}
+  .corr .verd{font-family:'Libre Franklin';font-weight:800;font-size:20px;margin-bottom:6px}
+  .corr .verd.ok{color:var(--green)} .corr .verd.fail{color:var(--coral)}
+  .pasos{margin-top:12px}
+  .pasos h4{font-family:'JetBrains Mono';font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--petrol);margin-bottom:8px}
+  .paso{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #EEF2F1;font-size:14px;align-items:baseline}
+  .paso .pn{font-family:'JetBrains Mono';font-weight:700;font-size:11px;color:var(--amber);flex:none}
+  .paso .pf{font-family:'JetBrains Mono';font-size:13px;color:var(--petrol)}
+  .paso .pr{color:var(--muted)}
+  .error-tip{margin-top:12px;background:#FFF9EC;border:1px solid #F0D89A;border-radius:9px;padding:10px 13px;font-size:13px;color:#5c4600}
+  .error-tip b{color:var(--amber)}
+
+  /* Simulacro */
+  .scorebar{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .scorebar .num{font-family:'Libre Franklin';font-weight:800;font-size:38px;color:var(--petrol)}
+  .scorebar .den{font-family:'JetBrains Mono';color:var(--muted)}
+  .scorebar .pill{margin-left:auto;font-size:13px;font-weight:700;padding:5px 12px;border-radius:20px}
+  .prog-line{font-family:'JetBrains Mono';font-size:13px;color:var(--muted);margin-bottom:10px}
+
+  /* Fórmulas ref */
+  .fref .f{font-family:'JetBrains Mono';font-size:12px;background:#F1F5F4;border-radius:7px;padding:6px 9px;margin-bottom:8px}
+  .fref .fl{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><span class="logo">Cálculo<b>Dosis</b>·AI</span><span class="tag">Farmacología enfermera</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="col-main">
+    <section class="panel" id="setupPanel">
+      <div class="panel-h"><span class="eyebrow">Config</span><h3>Preparar ejercicios</h3></div>
+      <div class="panel-b">
+        <div id="banner" class="banner"></div>
+
+        <div class="field">
+          <label class="lab">Tipo de cálculo</label>
+          <div class="tipogrid" id="tipogrid"></div>
+        </div>
+
+        <div class="row3">
+          <div class="field"><label class="lab">Dificultad</label>
+            <select class="inp" id="dif"><option value="basico">Básico</option><option value="intermedio" selected>Intermedio</option><option value="avanzado">Avanzado</option></select></div>
+          <div class="field"><label class="lab">Modo</label>
+            <div class="seg" id="modeSeg"><button data-m="practica" class="on">Práctica</button><button data-m="simulacro">Simulacro</button></div></div>
+          <div class="field" id="nsimField" style="display:none"><label class="lab">Nº ejercicios</label>
+            <input class="inp" id="nsim" type="number" min="3" max="20" value="10"></div>
+        </div>
+
+        <button class="btn btn-primary btn-block" id="genBtn">Generar ejercicio</button>
+
+        <details style="margin-top:12px"><summary style="font-size:12px;color:var(--muted);cursor:pointer;font-weight:600">Ajustes avanzados (API)</summary>
+          <div class="row2" style="margin-top:12px">
+            <div class="field"><label class="lab">OpenAI API Key</label><input class="inp" id="apiKey" type="password" placeholder="sk-…" autocomplete="off"><div class="hint">Solo en tu navegador. Compartida entre las apps.</div></div>
+            <div class="field"><label class="lab">Modelo</label><select class="inp" id="model"><option value="gpt-4o-mini" selected>gpt-4o-mini</option><option value="gpt-4o">gpt-4o</option><option value="gpt-4.1-mini">gpt-4.1-mini</option></select></div>
+          </div></details>
+      </div>
+    </section>
+
+    <section class="panel" id="exPanel" style="display:none">
+      <div class="panel-h"><span class="eyebrow" id="exEyebrow">Ejercicio</span><h3 id="exTitle">Cálculo</h3>
+        <button class="btn btn-line" id="resetBtn" style="margin-left:auto">Reiniciar</button></div>
+      <div class="panel-b">
+        <div class="prog-line" id="progLine" style="display:none"></div>
+        <div id="exBody"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="simResPanel" style="display:none">
+      <div class="panel-h"><span class="eyebrow">Resultado</span><h3>Simulacro completado</h3></div>
+      <div class="panel-b" id="simResBody"></div>
+    </section>
+  </div>
+
+  <div class="col-side">
+    <div class="panel">
+      <div class="panel-h"><span class="eyebrow">Fórmulas</span><h3>Referencia</h3></div>
+      <div class="panel-b fref" id="frefBox"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><span class="eyebrow">Guía</span><h3>Cómo funciona</h3></div>
+      <div class="panel-b" style="font-size:13.5px;color:var(--muted)">
+        <p style="margin:0 0 10px"><b style="color:var(--ink)">Práctica</b>: resuelve el ejercicio, introduce tu respuesta y pulsa Corregir. Verás la solución paso a paso.</p>
+        <p style="margin:0"><b style="color:var(--ink)">Simulacro</b>: responde N ejercicios seguidos y obtén tu nota y desglose por tipo.</p>
+        <p style="margin:10px 0 0;font-size:12px;background:#FFF3D6;border-radius:8px;padding:8px 10px;color:#5c4600">Los cálculos correctos los realiza el código, no la IA, para garantizar exactitud.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="foot">CálculoDosis·AI — variante del portfolio · cálculo determinista · <code>vanilla HTML/JS · OpenAI · docx.js · jsPDF</code> · herramienta formativa</div>
+
+<script>
+/* ═══ KERNEL ═══ */
+const $=s=>document.querySelector(s);
+const el=(t,c)=>{const e=document.createElement(t);if(c)e.className=c;return e;};
+const APP={id:'calcdosis',version:1};
+const K_KEY='ia_openai_key',K_MODEL='ia_openai_model',K_STATE=APP.id+':state';
+function loadCfg(){ $('#apiKey').value=localStorage.getItem(K_KEY)||''; const m=localStorage.getItem(K_MODEL); if(m)$('#model').value=m; }
+function saveCfg(){ localStorage.setItem(K_KEY,$('#apiKey').value.trim()); localStorage.setItem(K_MODEL,$('#model').value); }
+async function openai(messages,{json=false,temperature=0.6}={}){
+  const key=$('#apiKey').value.trim(); if(!key) throw new Error('NO_KEY');
+  const body={model:$('#model').value,messages,temperature}; if(json) body.response_format={type:'json_object'};
+  const r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+  if(!r.ok){ const t=await r.text(); if(r.status===401) throw new Error('BAD_KEY'); throw new Error('API '+r.status+': '+t.slice(0,180)); }
+  return (await r.json()).choices[0].message.content;
+}
+async function agente(system,user,{json=false,temperature=0.6}={}){ const out=await openai([{role:'system',content:system},{role:'user',content:String(user)}],{json,temperature}); return json?JSON.parse(out):out; }
+function banner(msg,type='info'){ const b=$('#banner'); b.className='banner '+type; b.textContent=msg; b.style.display=msg?'block':'none'; }
+function busy(btn,on,label){ if(on){ btn.dataset.old=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="spin"></span> '+(label||'…'); } else { btn.disabled=false; btn.innerHTML=btn.dataset.old||btn.innerHTML; } }
+function handleErr(e){ console.error(e);
+  if(e.message==='NO_KEY') banner('Introduce tu OpenAI API Key en «Ajustes avanzados (API)».','err');
+  else if(e.message==='BAD_KEY') banner('API Key no válida (401).','err');
+  else if(e instanceof SyntaxError) banner('Formato inesperado del modelo. Reintenta.','err');
+  else banner('⚠ '+e.message,'err'); }
+function saveState(o){ try{ localStorage.setItem(K_STATE,JSON.stringify({v:APP.version,data:o})); }catch(e){} }
+function loadState(){ try{ const s=JSON.parse(localStorage.getItem(K_STATE)); if(s&&s.v===APP.version) return s.data; localStorage.removeItem(K_STATE);}catch(e){} return null; }
+async function dlWord(filename,blocks){
+  const {Document,Packer,Paragraph,TextRun,HeadingLevel}=docx;
+  const P=(t,o={})=>new Paragraph({children:[new TextRun({text:String(t),...o})],spacing:{after:120}}); const ch=[];
+  blocks.forEach(b=>{ if(b.h1)ch.push(new Paragraph({text:b.h1,heading:HeadingLevel.HEADING_1}));
+    else if(b.h2)ch.push(new Paragraph({text:b.h2,heading:HeadingLevel.HEADING_2}));
+    else if(b.h3)ch.push(new Paragraph({text:b.h3,heading:HeadingLevel.HEADING_3}));
+    else if(b.p!==undefined)ch.push(P(b.p,b.opts||{}));
+    else if(b.bullets)b.bullets.forEach(x=>ch.push(new Paragraph({text:String(x),bullet:{level:0}})));
+    else if(b.kv)b.kv.forEach(([k,v])=>ch.push(new Paragraph({children:[new TextRun({text:k+': ',bold:true}),new TextRun({text:String(v)})],spacing:{after:80}})));
+    else if(b.spacer)ch.push(P('')); });
+  saveAs(await Packer.toBlob(new Document({sections:[{children:ch}]})),filename.endsWith('.docx')?filename:filename+'.docx');
+}
+function dlPDF(filename,blocks){
+  const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:'pt',format:'a4'}); const W=595,M=48; let y=56; const ink=[22,41,46],petrol=[14,75,84],muted=[92,112,118];
+  const line=(txt,size,style,color,gap)=>{ doc.setFont('helvetica',style||'normal'); doc.setFontSize(size||11); doc.setTextColor(...(color||ink));
+    doc.splitTextToSize(String(txt),W-M*2).forEach(l=>{ if(y>800){doc.addPage();y=56;} doc.text(l,M,y); y+=(size||11)*1.35; }); if(gap)y+=gap; };
+  doc.setFillColor(14,75,84); doc.rect(0,0,W,30,'F');
+  blocks.forEach(b=>{ if(b.h1)line(b.h1,17,'bold',petrol,4); else if(b.h2)line(b.h2,14,'bold',petrol,3); else if(b.h3)line(b.h3,12,'bold',ink,2);
+    else if(b.p!==undefined)line(b.p,11,'normal',ink,2); else if(b.bullets)b.bullets.forEach(x=>line('•  '+x,11,'normal',muted,1));
+    else if(b.kv)b.kv.forEach(([k,v])=>line(k+': '+v,11,'normal',ink,1)); else if(b.spacer)y+=8; });
+  doc.save(filename.endsWith('.pdf')?filename:filename+'.pdf');
+}
+
+/* ═══ TIPOS DE CÁLCULO ═══ */
+const TIPOS={
+  simple:{ic:'💊',nm:'Dosis simple',ds:'Volumen a administrar',unidad:'ml',formula:'Volumen = Dosis prescrita / Concentración disponible'},
+  peso:{ic:'⚖️',nm:'Dosis/peso',ds:'Dosis total y volumen por kg',unidad:'ml',formula:'Dosis total = Dosis·kg × Peso; Volumen = Dosis total / Conc.'},
+  perfusion:{ic:'💧',nm:'Perfusión ml/h',ds:'Velocidad de infusión',unidad:'ml/h',formula:'Velocidad = Volumen total (ml) / Tiempo (h)'},
+  goteo:{ic:'⏱',nm:'Ritmo de goteo',ds:'Gotas o microgotas/min',unidad:'gotas/min',formula:'Gotas/min = (Volumen ml × Factor) / Tiempo min — macrogotas: factor 20; microgotas: 60'},
+  dilucion:{ic:'🧪',nm:'Dilución',ds:'C₁V₁ = C₂V₂',unidad:'ml',formula:'V₂ = C₁ × V₁ / C₂  →  Solvente a añadir = V₂ − V₁'},
+  reconstitucion:{ic:'🔬',nm:'Reconstitución',ds:'Vial liofilizado',unidad:'ml',formula:'Vol reconstituir = Dosis vial / Conc deseada; Extraer = Dosis prescrita / Conc deseada'}
+};
+let tipoSel='simple'; let mode='practica';
+let BANK=[]; let simIdx=0; let simResults=[];
+
+/* ── AGENTE · Generador de ejercicio ── */
+const SCHEMAS={
+  simple:`{"farmaco":"nombre","dosis_prescrita":número,"unidad_dosis":"mg|g|UI|mEq","concentracion":número,"unidad_conc":"mg/ml|UI/ml|mEq/ml","vol_ampolla":número,"contexto":"1-2 frases clínicas"}`,
+  peso:`{"farmaco":"nombre","dosis_kg":número,"unidad_dosis_kg":"mg/kg|mcg/kg|UI/kg","peso_paciente":número,"concentracion":número,"unidad_conc":"mg/ml|mcg/ml|UI/ml","vol_ampolla":número,"contexto":"1-2 frases clínicas"}`,
+  perfusion:`{"farmaco":"nombre","volumen_total":número,"unidad_vol":"ml","tiempo":número,"unidad_tiempo":"h|min","contexto":"1-2 frases clínicas"}`,
+  goteo:`{"farmaco":"nombre","volumen_total":número,"tiempo_min":número,"tipo_equipo":"macrogotas|microgotas","contexto":"1-2 frases clínicas"}`,
+  dilucion:`{"farmaco":"nombre","c1":número,"unidad_c1":"mg/ml|%|UI/ml","v1":número,"c2_deseada":número,"unidad_c2":"mg/ml|%|UI/ml","contexto":"1-2 frases clínicas"}`,
+  reconstitucion:`{"farmaco":"nombre","dosis_vial":número,"unidad_vial":"mg|UI","conc_deseada":número,"unidad_conc_d":"mg/ml|UI/ml","dosis_prescrita":número,"contexto":"1-2 frases clínicas"}`
+};
+const DIFTXT={basico:'básico (números redondos, sin conversión de unidades)',intermedio:'intermedio (puede requerir conversión mg↔g, incluye decimales)',avanzado:'avanzado (conversiones complejas, valores decimales, escenario clínico realista)'};
+
+async function generarEjercicio(tipo, dif){
+  const T=TIPOS[tipo]; const schema=SCHEMAS[tipo];
+  const sys=`Eres enfermero/a docente. Genera UN ejercicio de cálculo de dosis de nivel ${DIFTXT[dif]}.
+Tipo: ${T.nm} (${T.ds}). Fórmula de referencia: ${T.formula}.
+Devuelve SOLO JSON con esta estructura exacta: ${schema}
+Los valores numéricos deben ser coherentes con la práctica clínica real (concentraciones de presentaciones comerciales plausibles). No incluyas la respuesta.`;
+  return await agente(sys,'Genera el ejercicio.',{json:true,temperature:0.8});
+}
+
+/* ═══ CÁLCULO DETERMINISTA EN CLIENTE ═══ */
+function rnd(n,dec=2){ return Math.round(n*Math.pow(10,dec))/Math.pow(10,dec); }
+
+function calcular(tipo,d){
+  try{
+    if(tipo==='simple'){
+      const v=d.dosis_prescrita/d.concentracion;
+      const pasos=[
+        {n:'1',f:'Volumen = Dosis prescrita / Concentración',r:`${d.dosis_prescrita} ${d.unidad_dosis} / ${d.concentracion} ${d.unidad_conc}`},
+        {n:'2',f:'Resultado',r:`${rnd(v)} ml`}
+      ]; return {res:rnd(v),unidad:'ml',pasos,errorTip:detectarError_simple(d)};
+    }
+    if(tipo==='peso'){
+      const dosis_total=rnd(d.dosis_kg*d.peso_paciente);
+      const v=rnd(dosis_total/d.concentracion);
+      const pasos=[
+        {n:'1',f:'Dosis total = Dosis/kg × Peso',r:`${d.dosis_kg} ${d.unidad_dosis_kg} × ${d.peso_paciente} kg = ${dosis_total} ${d.unidad_dosis_kg.replace('/kg','')}`},
+        {n:'2',f:'Volumen = Dosis total / Concentración',r:`${dosis_total} / ${d.concentracion} ${d.unidad_conc} = ${v} ml`}
+      ]; return {res:v,unidad:'ml',pasos,dosis_total,errorTip:'Recuerda multiplicar por el peso ANTES de dividir por la concentración.'};
+    }
+    if(tipo==='perfusion'){
+      const h=d.unidad_tiempo==='min'?d.tiempo/60:d.tiempo;
+      const vel=rnd(d.volumen_total/h);
+      const pasos=[
+        ...(d.unidad_tiempo==='min'?[{n:'1',f:'Conversión de tiempo',r:`${d.tiempo} min ÷ 60 = ${rnd(h,3)} h`}]:[]),
+        {n: d.unidad_tiempo==='min'?'2':'1',f:'Velocidad = Volumen total / Tiempo',r:`${d.volumen_total} ml / ${rnd(h,3)} h = ${vel} ml/h`}
+      ]; return {res:vel,unidad:'ml/h',pasos,errorTip:'Si el tiempo está en minutos, conviértelo a horas antes de dividir.'};
+    }
+    if(tipo==='goteo'){
+      const factor=d.tipo_equipo==='microgotas'?60:20;
+      const g=rnd((d.volumen_total*factor)/d.tiempo_min);
+      const pasos=[
+        {n:'1',f:`Factor de equipo (${d.tipo_equipo})`,r:`Factor = ${factor}`},
+        {n:'2',f:'Gotas/min = (Volumen × Factor) / Tiempo',r:`(${d.volumen_total} ml × ${factor}) / ${d.tiempo_min} min = ${g} gotas/min`}
+      ]; return {res:g,unidad:'gotas/min',pasos,errorTip:`Con ${d.tipo_equipo} el factor es ${factor}. Confundir el factor es el error más frecuente.`};
+    }
+    if(tipo==='dilucion'){
+      const v2=rnd((d.c1*d.v1)/d.c2_deseada);
+      const sv=rnd(v2-d.v1);
+      const pasos=[
+        {n:'1',f:'C₁V₁ = C₂V₂ → V₂ = C₁V₁ / C₂',r:`(${d.c1} ${d.unidad_c1} × ${d.v1} ml) / ${d.c2_deseada} ${d.unidad_c2} = ${v2} ml (volumen final)`},
+        {n:'2',f:'Solvente a añadir = V₂ − V₁',r:`${v2} ml − ${d.v1} ml = ${sv} ml de solvente`}
+      ]; return {res:sv,unidad:'ml de solvente',extraRes:{label:'Volumen final (V₂)',val:v2,unidad:'ml'},pasos,errorTip:'Recuerda: el resultado pedido es el solvente a AÑADIR, no el volumen final total.'};
+    }
+    if(tipo==='reconstitucion'){
+      const v_rec=rnd(d.dosis_vial/d.conc_deseada);
+      const v_ext=rnd(d.dosis_prescrita/d.conc_deseada);
+      const pasos=[
+        {n:'1',f:'Volumen de reconstitución = Dosis vial / Conc. deseada',r:`${d.dosis_vial} ${d.unidad_vial} / ${d.conc_deseada} ${d.unidad_conc_d} = ${v_rec} ml`},
+        {n:'2',f:'Volumen a extraer = Dosis prescrita / Conc. deseada',r:`${d.dosis_prescrita} ${d.unidad_vial} / ${d.conc_deseada} ${d.unidad_conc_d} = ${v_ext} ml`}
+      ]; return {res:v_ext,unidad:'ml a extraer',extraRes:{label:'Volumen de reconstitución',val:v_rec,unidad:'ml'},pasos,errorTip:'Primero calcula el volumen para reconstituir todo el vial; luego extrae la parte proporcional a la dosis prescrita.'};
+    }
+  }catch(e){ return null; }
+}
+function detectarError_simple(d){ return 'Si el resultado no es un número entero, revisa las unidades: asegúrate de que dosis y concentración estén en las mismas unidades.'; }
+
+/* ── Enunciado ── */
+function enunciadoTxt(tipo,d){
+  if(tipo==='simple') return `Prescripción: ${d.dosis_prescrita} ${d.unidad_dosis} de ${d.farmaco}.\nDisponible: ampollas de ${d.vol_ampolla} ml con ${d.concentracion} ${d.unidad_conc}.\n${d.contexto}\n¿Qué volumen debes administrar?`;
+  if(tipo==='peso') return `Prescripción: ${d.dosis_kg} ${d.unidad_dosis_kg} de ${d.farmaco} para un paciente de ${d.peso_paciente} kg.\nDisponible: ampollas de ${d.vol_ampolla} ml con ${d.concentracion} ${d.unidad_conc}.\n${d.contexto}\n¿Qué volumen debes administrar?`;
+  if(tipo==='perfusion') return `Se prescribe ${d.farmaco}: ${d.volumen_total} ${d.unidad_vol} en ${d.tiempo} ${d.unidad_tiempo}.\n${d.contexto}\n¿A qué velocidad debes programar la bomba (ml/h)?`;
+  if(tipo==='goteo') return `Se prescribe ${d.farmaco}: ${d.volumen_total} ml en ${d.tiempo_min} minutos, con equipo de ${d.tipo_equipo}.\n${d.contexto}\n¿Cuántas gotas por minuto debes ajustar?`;
+  if(tipo==='dilucion') return `Necesitas preparar una solución de ${d.farmaco} a ${d.c2_deseada} ${d.unidad_c2}.\nDisponible: ${d.v1} ml a ${d.c1} ${d.unidad_c1}.\n${d.contexto}\n¿Cuánto solvente debes añadir?`;
+  if(tipo==='reconstitucion') return `Vial liofilizado de ${d.farmaco}: ${d.dosis_vial} ${d.unidad_vial}. Debes reconstituirlo a ${d.conc_deseada} ${d.unidad_conc_d}.\nPrescripción: ${d.dosis_prescrita} ${d.unidad_vial}.\n${d.contexto}\n¿Qué volumen debes extraer del vial reconstituido?`;
+  return '—';
+}
+
+/* ── Estado de la app ── */
+let ST={tipo:tipoSel,dif:'intermedio',ex:null,cal:null,corrected:false};
+
+/* ── Flujo Práctica ── */
+async function genPractica(){
+  banner(''); const tipo=tipoSel; const dif=$('#dif').value; const btn=$('#genBtn'); busy(btn,true,'Generando…');
+  try{
+    const d=await generarEjercicio(tipo,dif); const cal=calcular(tipo,d);
+    if(!cal){ banner('Error en los datos del ejercicio. Reintenta.','err'); return; }
+    ST={tipo,dif,ex:d,cal,corrected:false}; saveState(ST);
+    renderPractica(d,cal,tipo);
+    $('#exPanel').style.display='block'; $('#simResPanel').style.display='none';
+    $('#exPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){ handleErr(e); } finally{ busy(btn,false); }
+}
+function renderPractica(d,cal,tipo,idx,total){
+  const b=$('#exBody'); b.innerHTML='';
+  const T=TIPOS[tipo];
+  $('#exEyebrow').textContent=T.nm; $('#exTitle').textContent='Ejercicio'+(idx!=null?` ${idx+1}/${total}`:'');
+  if(idx!=null){ $('#progLine').style.display='block'; $('#progLine').textContent=`Ejercicio ${idx+1} de ${total}`; }
+  else $('#progLine').style.display='none';
+  b.innerHTML=`<div class="enunciado"><div class="tipo-tag">${T.nm}</div><div class="txt">${enunciadoTxt(tipo,d).replace(/\n/g,'<br>')}</div></div>
+    <div class="field"><label class="lab">Tu respuesta</label>
+      <div class="respuesta-row"><input class="inp" id="respInput" type="number" step="0.01" placeholder="Introduce el resultado…"><span class="unidad">${T.unidad}</span></div></div>
+    <div class="toolbar"><button class="btn btn-amber" id="corregirBtn">Corregir</button></div>
+    <div id="corrBox"></div>`;
+  $('#respInput').addEventListener('keydown',e=>{ if(e.key==='Enter') corregir(cal,tipo,d); });
+  $('#corregirBtn').onclick=()=>corregir(cal,tipo,d);
+}
+function corregir(cal,tipo,d, onOk){
+  const raw=parseFloat($('#respInput').value); if(isNaN(raw)){ return; }
+  const correcto=cal.res; const tolerancia=0.05; const ok=Math.abs(raw-correcto)<=Math.max(tolerancia,correcto*0.02);
+  ST.corrected=true; saveState(ST);
+  const box=$('#corrBox');
+  let html=`<div class="corr ${ok?'ok':'fail'}"><div class="verd ${ok?'ok':'fail'}">${ok?'✓ Correcto':'✗ Incorrecto'}</div>
+    Tu respuesta: <b>${raw} ${cal.unidad}</b>${ok?'':` · Correcta: <b>${correcto} ${cal.unidad}</b>`}</div>`;
+  if(cal.extraRes) html+=`<div class="hint" style="margin-top:6px"><b>${cal.extraRes.label}:</b> ${cal.extraRes.val} ${cal.extraRes.unidad}</div>`;
+  if(!ok && cal.errorTip) html+=`<div class="error-tip"><b>Error frecuente:</b> ${cal.errorTip}</div>`;
+  html+=`<div class="pasos"><h4>Resolución paso a paso</h4>${cal.pasos.map(p=>`<div class="paso"><span class="pn">P${p.n}</span><div><div class="pf">${p.f}</div><div class="pr">${p.r}</div></div></div>`).join('')}</div>`;
+  box.innerHTML=html;
+  if(typeof onOk==='function') onOk(ok,raw);
+  else {
+    const tb=el('div','toolbar'); tb.innerHTML='<button class="btn btn-primary" id="nextBtn">Siguiente ejercicio</button><button class="btn btn-line" id="dlW">⬇ Word</button>';
+    box.innerHTML+=tb.outerHTML; box.querySelector('#nextBtn').onclick=genPractica;
+    box.querySelector('#dlW').onclick=()=>dlWord('ejercicio_dosis',[{h1:'Ejercicio de cálculo de dosis'},{p:enunciadoTxt(tipo,d)},{h3:'Resolución'},{bullets:cal.pasos.map(p=>`P${p.n}: ${p.f} → ${p.r}`)}]);
+  }
+}
+
+/* ── Flujo Simulacro ── */
+async function genSimulacro(){
+  banner(''); const tipo=tipoSel; const dif=$('#dif').value; const n=Math.min(20,Math.max(3,parseInt($('#nsim').value)||10));
+  const btn=$('#genBtn'); busy(btn,true,'Generando…');
+  BANK=[]; simIdx=0; simResults=[];
+  $('#exPanel').style.display='block'; $('#simResPanel').style.display='none';
+  $('#exPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+  try{
+    for(let i=0;i<n;i++){
+      $('#progLine').style.display='block'; $('#progLine').textContent=`Generando ejercicio ${i+1}/${n}…`; busy(btn,true,`${i+1}/${n}…`);
+      const d=await generarEjercicio(tipo,dif); const cal=calcular(tipo,d);
+      if(cal) BANK.push({d,cal,tipo}); await new Promise(r=>setTimeout(r,30));
+    }
+    $('#progLine').style.display='none'; simIdx=0; mostrarSimEjercicio();
+  }catch(e){ handleErr(e); } finally{ busy(btn,false); }
+}
+function mostrarSimEjercicio(){
+  if(simIdx>=BANK.length){ finSimulacro(); return; }
+  const {d,cal,tipo}=BANK[simIdx]; renderPractica(d,cal,tipo,simIdx,BANK.length);
+  $('#corregirBtn').onclick=()=>{
+    const raw=parseFloat($('#respInput').value); if(isNaN(raw)) return;
+    corregir(cal,tipo,d,(ok)=>{
+      simResults.push({tipo,ok,respuesta:raw,correcta:cal.res,unidad:cal.unidad,enun:enunciadoTxt(tipo,d),pasos:cal.pasos});
+      const tb=el('div','toolbar'); tb.innerHTML=`<button class="btn btn-primary" id="nextSimBtn">${simIdx+1<BANK.length?'Siguiente →':'Ver resultado'}</button>`;
+      const cb=$('#corrBox'); const old=cb.querySelector('.toolbar'); if(old)old.remove(); cb.appendChild(tb);
+      tb.querySelector('#nextSimBtn').onclick=()=>{ simIdx++; mostrarSimEjercicio(); };
+    });
+  };
+}
+function finSimulacro(){
+  const ok=simResults.filter(r=>r.ok).length; const total=simResults.length; const nota=total?10*ok/total:0;
+  const pill=nota>=5?'#1E9E8A':'#D9573F';
+  let html=`<div class="scorebar"><span class="num">${nota.toFixed(1)}</span><span class="den">/ 10</span><span class="pill" style="background:${pill}22;color:${pill}">${ok}/${total} correctos</span></div>`;
+  html+=`<table style="width:100%;border-collapse:collapse;font-size:13px;margin:10px 0"><thead><tr>${['Ej','Tipo','Tu resp','Correcta',''].map(h=>`<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-family:'JetBrains Mono';font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">${h}</th>`).join('')}</tr></thead><tbody>`;
+  simResults.forEach((r,i)=>{ const vc=r.ok?'#1E9E8A':'#D9573F';
+    html+=`<tr><td style="padding:6px 8px;border-bottom:1px solid #EEF2F1;font-family:'JetBrains Mono'">${i+1}</td><td style="padding:6px 8px;border-bottom:1px solid #EEF2F1">${TIPOS[r.tipo].nm}</td><td style="padding:6px 8px;border-bottom:1px solid #EEF2F1;font-family:'JetBrains Mono'">${r.respuesta} ${r.unidad}</td><td style="padding:6px 8px;border-bottom:1px solid #EEF2F1;font-family:'JetBrains Mono'">${r.correcta} ${r.unidad}</td><td style="padding:6px 8px;border-bottom:1px solid #EEF2F1;font-weight:700;color:${vc}">${r.ok?'✓':'✗'}</td></tr>`; });
+  html+='</tbody></table>';
+  $('#simResBody').innerHTML=html;
+  const tb=el('div','toolbar'); tb.innerHTML='<button class="btn btn-primary" id="dlSimW">⬇ Word</button><button class="btn btn-ghost" id="dlSimP">⬇ PDF</button><button class="btn btn-line" id="repsimBtn">Repetir</button>';
+  $('#simResBody').appendChild(tb);
+  tb.querySelector('#repsimBtn').onclick=()=>{ $('#simResPanel').style.display='none'; genSimulacro(); };
+  const bk=simResultBlocks(nota,ok,total);
+  tb.querySelector('#dlSimW').onclick=()=>dlWord('simulacro_dosis',bk); tb.querySelector('#dlSimP').onclick=()=>dlPDF('simulacro_dosis',bk);
+  $('#exPanel').style.display='none'; $('#simResPanel').style.display='block'; $('#simResPanel').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function simResultBlocks(nota,ok,total){ const b=[{h1:'Simulacro CálculoDosis·AI'},{kv:[['Nota',nota.toFixed(1)+'/10'],['Aciertos',ok+'/'+total]]},{spacer:true},{h3:'Detalle'}];
+  simResults.forEach((r,i)=>{ b.push({p:`${i+1}. [${TIPOS[r.tipo].nm}] ${r.ok?'✓':'✗'} — Tu respuesta: ${r.respuesta} ${r.unidad} | Correcta: ${r.correcta} ${r.unidad}`}); }); return b; }
+
+/* ── Fórmulas de referencia ── */
+function renderFormulas(){ $('#frefBox').innerHTML=Object.entries(TIPOS).map(([k,T])=>`<div class="fl">${T.ic} <b>${T.nm}</b></div><div class="f">${T.formula}</div>`).join(''); }
+
+/* ── Selección de tipo ── */
+function renderTipos(){ const g=$('#tipogrid'); g.innerHTML='';
+  Object.entries(TIPOS).forEach(([k,T])=>{ const c=el('button','tcard'+(k===tipoSel?' sel':'')); c.innerHTML=`<div class="tc-ic">${T.ic}</div><div class="tc-nm">${T.nm}</div><div class="tc-ds">${T.ds}</div>`;
+    c.onclick=()=>{ tipoSel=k; renderTipos(); }; g.appendChild(c); }); }
+
+/* ── INIT ── */
+window.addEventListener('DOMContentLoaded',()=>{
+  loadCfg(); renderTipos(); renderFormulas();
+  $('#apiKey').addEventListener('change',saveCfg); $('#model').addEventListener('change',saveCfg);
+  document.querySelectorAll('#modeSeg button').forEach(b=>b.onclick=()=>{
+    mode=b.dataset.m; document.querySelectorAll('#modeSeg button').forEach(x=>x.classList.toggle('on',x.dataset.m===mode));
+    $('#nsimField').style.display=mode==='simulacro'?'block':'none';
+    $('#genBtn').textContent=mode==='simulacro'?'Generar simulacro':'Generar ejercicio';
+  });
+  $('#genBtn').onclick=()=>mode==='simulacro'?genSimulacro():genPractica();
+  $('#resetBtn').onclick=()=>{ localStorage.removeItem(K_STATE); $('#exPanel').style.display='none'; $('#simResPanel').style.display='none'; window.scrollTo({top:0,behavior:'smooth'}); };
+  const prev=loadState();
+  if(prev&&prev.ex&&prev.cal){ ST=prev; tipoSel=prev.tipo||'simple'; renderTipos(); $('#exPanel').style.display='block'; renderPractica(prev.ex,prev.cal,prev.tipo); if(prev.corrected) corregir(prev.cal,prev.tipo,prev.ex); }
+});
+</script>
+</body>
+</html>
